@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#050817">
+<title>点亮星空后台</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(circle at top,#18285b,#050817 65%);color:#fff;font-family:Arial,"Microsoft YaHei",sans-serif;padding:28px}
+.box{max-width:560px;margin:40px auto;background:#ffffff0d;border:1px solid #ffffff1c;border-radius:20px;padding:28px;box-shadow:0 20px 80px #0006}
+h1{font-weight:400}
+input,button{width:100%;padding:13px;margin:8px 0;border-radius:9px;border:1px solid #ffffff22;font-size:15px}
+input{background:#0006;color:#fff}
+button{background:#eee0a0;color:#111;font-weight:600;cursor:pointer}
+.danger{background:#a83b4b;color:#fff}.secondary{background:#ffffff15;color:#fff}
+#panel{display:none}#status{min-height:22px;color:#fff9a8}
+.small{font-size:12px;color:#ffffff66;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>✦ 点亮星空｜活动后台</h1>
+
+  <div id="login">
+    <input id="email" type="email" autocomplete="username" placeholder="管理员邮箱">
+    <input id="password" type="password" autocomplete="current-password" placeholder="管理员密码">
+    <button id="loginBtn" type="button">登录</button>
+  </div>
+
+  <div id="panel">
+    <p id="who"></p>
+    <label>当前星星</label>
+    <input id="stars" type="number" min="0">
+    <label>目标数量</label>
+    <input id="target" type="number" min="1">
+
+    <button id="save" type="button">保存设置</button>
+    <button id="reset" class="danger" type="button">重置星星为 0</button>
+    <button id="logout" class="secondary" type="button">退出登录</button>
+
+    <p id="status"></p>
+    <p class="small">
+      提示：活动开始前建议打开主页面测试一次，再在这里把星星重置为 0。
+    </p>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+"use strict";
+
+let client = null;
+const $ = id => document.getElementById(id);
+
+async function init() {
+  try {
+    const r = await fetch("config.json?ts=" + Date.now(), {cache:"no-store"});
+    if (!r.ok) throw new Error("config.json 加载失败");
+    const cfg = await r.json();
+
+    if (!cfg.SUPABASE_URL || !cfg.SUPABASE_KEY ||
+        cfg.SUPABASE_URL.includes("PASTE_") ||
+        cfg.SUPABASE_KEY.includes("PASTE_")) {
+      throw new Error("config.json 尚未填写 Supabase 配置");
+    }
+
+    if (!window.supabase?.createClient) {
+      throw new Error("Supabase JS 加载失败");
+    }
+
+    client = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_KEY);
+    await checkSession();
+  } catch (e) {
+    $("status").textContent = "连接错误：" + e.message;
+  }
+}
+
+async function checkSession() {
+  const res = await client.auth.getSession();
+  if (res.error) {
+    $("status").textContent = res.error.message;
+    return;
+  }
+
+  if (res.data.session) {
+    $("login").style.display = "none";
+    $("panel").style.display = "block";
+    $("who").textContent = "已登录：" + res.data.session.user.email;
+    await load();
+  } else {
+    $("login").style.display = "block";
+    $("panel").style.display = "none";
+  }
+}
+
+async function load() {
+  const res = await client.rpc("get_activity");
+  if (res.error) {
+    $("status").textContent = res.error.message;
+    return;
+  }
+
+  $("stars").value = res.data.stars;
+  $("target").value = res.data.target;
+}
+
+$("loginBtn").onclick = async () => {
+  $("status").textContent = "正在登录……";
+
+  const res = await client.auth.signInWithPassword({
+    email: $("email").value.trim(),
+    password: $("password").value
+  });
+
+  if (res.error) {
+    $("status").textContent = "登录失败：" + res.error.message;
+    return;
+  }
+
+  $("status").textContent = "登录成功";
+  await checkSession();
+};
+
+$("save").onclick = async () => {
+  const stars = Math.max(0, Number($("stars").value) || 0);
+  const target = Math.max(1, Number($("target").value) || 500);
+
+  const res = await client
+    .from("activity")
+    .update({stars, target})
+    .eq("id", 1);
+
+  $("status").textContent = res.error ? res.error.message : "已保存";
+  if (!res.error) await load();
+};
+
+$("reset").onclick = async () => {
+  if (!confirm("确定把星星重置为 0 吗？")) return;
+
+  const res = await client
+    .from("activity")
+    .update({stars:0})
+    .eq("id", 1);
+
+  $("status").textContent = res.error ? res.error.message : "已重置";
+  if (!res.error) await load();
+};
+
+$("logout").onclick = async () => {
+  await client.auth.signOut();
+  await checkSession();
+};
+
+init();
+</script>
+</body>
+</html>
